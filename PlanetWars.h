@@ -8,6 +8,10 @@
 
 #include <string>
 #include <vector>
+#include <map>
+
+#define DEBUGFILE 0
+
 
 // This is a utility class that parses strings.
 class StringUtil {
@@ -24,6 +28,89 @@ class StringUtil {
                        const std::string& delimiters = std::string(" "));
 };
 
+//************************************************************************
+//Path Finder
+
+class Node
+{
+	int m_nPlanetID;
+	int m_nDistance;
+	
+public:
+	Node ( int nPlanetID, int nDistance);
+	int GetPlanetID() const;
+	int GetDistance() const;
+};
+
+class DistanceNode
+{
+	Node ** m_nodes;
+	int m_nSize;
+
+public:
+	DistanceNode(int size = 256);
+	~DistanceNode();
+	void Add(int nPlanetID, int nDistance);
+	void Add(Node* node);
+	void Delete();
+
+	int Find(int nPlanetID);
+	Node* Get(int nId);
+	
+	void Sort();
+};
+
+//*************************************************************************
+class PlanetWars;
+class Order
+{
+	//puntuacion asociada a la orden
+	double m_dScore;
+	int m_nSourcePlanet;
+	int m_nDestinationPlanet;
+	int m_nPathDestinationPlanet;
+	int m_nShips;
+	
+	public:
+		
+	Order(int source, int dest, int ships, double score);
+	Order(int source, int dest, int path, int ships, double score);
+	double GetScore() const;
+	void SetScore(double dScore);
+	void SetSourcePlanet(int nSourcePlanet);
+	int GetSourcePlanet() const;
+	void SetDestinationPlanet(int nDestinationPlanet);
+	int GetDestinationPlanet() const;
+	void SetPathDestinationPlanet(int nPathDestinationPlanet);
+	int GetPathDestinationPlanet() const;
+	void SetShips(int nShips);
+	int GetShips() const;
+	
+};
+
+class Orders
+{
+	Order ** m_orders;
+	int m_nSize;
+
+	void Sort();
+	
+public:
+	Orders(int size = 4096);
+	~Orders();
+	void Add(int source, int dest, int ships, double score);
+	void Add(int source, int dest, int nPathDest, int ships, double score);
+	void Add(Order* order);
+	void Execute(const PlanetWars& pw);
+	//returns true if an order from source to dest with higher score exists
+	bool Check(int source, int dest) const;
+	void Delete();
+	Order* GetFirst();
+};
+
+
+
+//*************************************************************************
 // This class stores details about one fleet. There is one of these classes
 // for each fleet that is in flight at any given time.
 class Fleet {
@@ -68,6 +155,9 @@ class Fleet {
   int turns_remaining_;
 };
 
+
+
+//*************************************************************************
 // Stores information about one planet. There is one instance of this class
 // for each planet on the map.
 class Planet {
@@ -78,8 +168,12 @@ class Planet {
          int num_ships,
          int growth_rate,
          double x,
-         double y);
+         double y,
+         int nTurn = 0);
 
+  Planet(const Planet &p);
+  ~Planet();
+  
   // Returns the ID of this planets. Planets are numbered starting at zero.
   int PlanetID() const;
 
@@ -110,18 +204,74 @@ class Planet {
   void AddShips(int amount);
   void RemoveShips(int amount);
 
+
+  // Interface for future state of the planet
+  // return the number of turns in the future that corresponds to the state of the planet
+  int GetTurn() const;
+  // includes data of fleet as arraiving to the planet (in turn turn_)
+  bool FleetArrive(const Fleet& f);
+  // does battle resolution and increments turn
+  int BattleResolution();
+  
+  int GetMinimumState() const;
+  int CalculateMinimumState();
+  int GetMaxAid() const;
+//  void SetMaxAid(std::vector<Planet> planets, std::vector<Fleet> fleets);
+  void SetMaxAid(int nMaxAid);
+  int GetMaxAidEnemy() const;
+  void SetMaxAidEnemy(int nMaxAid);
+//  void SetMaxAidEnemy(std::vector<Planet> planets, std::vector<Fleet> fleets);
+  int GetLocationScore() const;
+  void SetLocationScore(int nScore);
+  bool IsFrontPlanet() const;
+  //required supplies to not lose the planet
+  int GetRequiredSupplyShips() const;
+
+  //true if a T-turn planet can be defended in that turn
+  bool IsStable() const;
+  //are we going to loose this planet in this turn???
+  bool IsGoingToBeLost() const;
+  
+  
+  int Distance(const Planet&p1);
+  
  private:
   int planet_id_;
   int owner_;
-  int num_ships_;
+  int num_ships_[3];
   int growth_rate_;
   double x_, y_;
+  
+  //indicates the turn in the future of this planet
+  int turn_;
+  //indicates the free ships of this planet. That is, for turn turn_ , we (or the enemy, if he is the owner)
+  //could safely send this ships away without having problems with the possesion of the
+  //planet, at least until turn turn_
+  int nMinimumState_;
+  //maximum number of ships I can send to this planet, in turn turn_
+  int nMaxAid_;
+  //maximum number of ships enemy can send to this planet, in turn turn_
+  int nMaxAidEnemy_;
+  //location score. >1 implies "backland", <1 is "frontland".
+  int nTerritoryScore_;
+
+  
+  //are we going to loose this planet in this turn???
+  bool bPlanetLost_ ;
 };
 
+
+
+
+
+//*************************************************************************
 class PlanetWars {
  public:
+  PlanetWars();
+  ~PlanetWars();
+  
   // Initializes the game state given a string containing game state data.
-  PlanetWars(const std::string& game_state);
+  void NewTurn(const std::string& game_state);
 
   // Returns the number of planets on the map. Planets are numbered starting
   // with 0.
@@ -175,6 +325,15 @@ class PlanetWars {
   // the two planets.
   int Distance(int source_planet, int destination_planet) const;
 
+  	//returns distance max from and to every planet in the map
+	int GetMaxDistance() const;
+	//returns the distance with the farest planet
+	int CalculateMaxDistance(const Planet &p);
+	//returns the distance with the farest planet of given owner 
+	int CalculateMaxDistance(const Planet &p, int nOwner);
+ 	//returns the average distance with enemy planets
+	int CalculateAvgEnemyDistance(const Planet &p);
+
   // Sends an order to the game engine. The order is to send num_ships ships
   // from source_planet to destination_planet. The order must be valid, or
   // else your bot will get kicked and lose the game. For example, you must own
@@ -196,15 +355,113 @@ class PlanetWars {
   // issuing orders for now.
   void FinishTurn() const;
 
+	int GetFreeShips(int planetID) ;
+	int GetFreeShipsAidEnemy(int planetID) ;
+	int GetMaxDistance(int planetID) ;
+
+	// supply movements FROM p
+	void GenerateSupplyMovements(const Planet& p);
+	//attack movements FROM p
+	void GenerateAttackMovements(const Planet& p, bool bParanoicMode);
+	// defense movements (to avoid lost planets) TO p
+	void DefendPossibleLostPlanets(const Planet& p);
+	void ExecuteOrders();
+
+	//makes all FPS calculation, needed to issue orders
+	void CalculateFPS();
+	void ReCalculateFPS(Order* order);
+
+	Order* GetFirstVirtualOrder();
+	void AddDefinitiveOrder(Order* currentOrder);
+	bool CheckOrder(int source, int dest) const;
+	
+	bool IsFrontPlanet(int nPlanetID, int nTurn);
+	bool IsMine(int nPlanetID, int nTurn);
+
+  int GetMyGrowthFuture();
+  int GetEnemyGrowthFuture();
+
+  bool IamGoingToLose() const;
+  void ClearAttackOrders();
+  int GetAttackOrders() const;
+
  private:
   // Parses a game state from a string. On success, returns 1. On failure,
   // returns 0.
   int ParseGameState(const std::string& s);
 
+  //generates de fuyture planet states structure
+  void GenerateFPS();
+  void ReGenerateFPS(Order* order);
+  
+  //calculates minimum state for a planet. That is, the maximum number of ships
+  //we can send from the planet by means of FPS until given turn 
+  int CalculateFreeShips(const Planet& p, int nUntilTurn);
+ 
+  //calculates minimum state for a planet, including possible Enemy Aid and mine
+  int CalculateFreeShipsAidEnemy(const Planet& p, int nUntilTurn);
+
+  //fills maxDistances_ map, useful for avoid snipping 
+  void CalculateMaxDistances();
+  void CalculateAvgEnemyDistances();
+
+  //generates location score on myplanets, for every turn
+  void GenerateLocationScoring(int nTurn);
+
+  // calculates MaxAid y Max AidEnemy para el turno nTurn. Actualiza FPS.
+  void CalculateMaxAids(int nTurn);
+
+  //calculates growths in current turn 
+  int CalculateMyGrowth();
+  int CalculateEnemyGrowth();
+
+  //calculates growths in turn T based on FPS
+  int CalculateMyGrowth(int nTurn) ;
+  int CalculateEnemyGrowth(int nTurn) ;
+  int CalculateMyShips(int nTurn) ;
+  int CalculateEnemyShips(int nTurn) ;
+
+  
   // Store all the planets and fleets. OMG we wouldn't wanna lose all the
   // planets and fleets, would we!?
   std::vector<Planet> planets_;
   std::vector<Fleet> fleets_;
+  
+  void CalculatePaths();
+  std::map<int , int> CalculatePathsFromPlanet(int nPlanetID);
+  int CalculatePathFromTo(int source, int dest);
+  
+  int m_nMaxDistance;
+  //list with all sets of planets, future state in turn n (map by PlanetID)
+  std::map<int, std::vector<Planet> > fps_;
+  //hash by planetID of minimum state por a planet in MaxDistance turns
+  std::map<int, int> freeShips_;
+  //hash by PlanetID with maximum distances to each planet
+  std::map<int, int> maxDistances_;
+  //hash by PlanetID with average distances to enemyplanets
+  std::map<int, int> avgEnemyDistances_;
+  //hash by planetID of minimum state for a planet in MaxDistance turns, including MaxAidEnemy
+  std::map<int, int> freeShipsAidEnemy_;
+  
+  //hash by planetID of distances with the rest of universe, ordered by distance
+  std::map<int, DistanceNode*> planetDistances_;
+  
+  //hash of hashes of paths to supply ships
+  std::map<int, std::map<int, int> > paths_;
+  
+  int nMyGrowth_;
+  int nEnemyGrowth_;
+  int nMyGrowthFuture_;
+  int nEnemyGrowthFuture_;
+  int nMyShipsFuture_;
+  int nEnemyShipsFuture_;
+  
+  Orders orders;
+  Orders definitiveOrders_;
+
+  int m_nAttackOrders;
 };
+
+
 
 #endif
